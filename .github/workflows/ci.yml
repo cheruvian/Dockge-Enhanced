@@ -85,6 +85,10 @@ jobs:
         if: steps.docs.outputs.docs_only != 'true'
         run: npx tsx --test backend/start-guard.test.ts
 
+      - name: Tests des commits Git par stack
+        if: steps.docs.outputs.docs_only != 'true'
+        run: npx tsx --test backend/stack-git-service.test.ts
+
       - name: Tests des noms affichés des stacks et de leur identité Compose
         if: steps.docs.outputs.docs_only != 'true'
         run: npx tsx --test backend/stack-display-name.test.ts

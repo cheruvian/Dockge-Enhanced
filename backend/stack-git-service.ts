@@ -159,7 +159,7 @@ export class StackGitService {
         if (!message || message.length > 500 || /[\u0000\r\n]/.test(message)) {
             throw new ValidationError("Commit message is required, must be one line, and must not exceed 500 characters");
         }
-        const status = await this.run(cwd, [ "status", "--porcelain=v1", "--untracked-files=all" ]);
+        const status = await this.run(cwd, [ "status", "--porcelain=v1", "--untracked-files=all", "--", "." ]);
         const sensitive = status.stdout.split(/\r?\n/)
             .filter(Boolean)
             .map(line => line.slice(3))
@@ -167,19 +167,20 @@ export class StackGitService {
         if (sensitive.length > 0) {
             throw new ValidationError(`Sensitive files must be removed or ignored before commit: ${sensitive.join(", ")}`);
         }
-        await this.run(cwd, [
-            "add", "-A", "--",
+        const paths = [
             ".", ":(exclude).env", ":(exclude).env.*", ":(exclude)secrets/**",
             ":(exclude)*.pem", ":(exclude)*.key", ":(exclude)*.p12", ":(exclude)*.pfx",
-        ]);
-        const staged = await this.run(cwd, [ "diff", "--cached", "--name-only" ]);
+        ];
+        await this.run(cwd, [ "add", "-A", "--", ...paths ]);
+        const staged = await this.run(cwd, [ "diff", "--cached", "--name-only", "--", ...paths ]);
         if (!staged.stdout.trim()) {
             throw new ValidationError("No safe Git change to commit");
         }
         await this.run(cwd, [
             "-c", "user.name=Dockge Enhanced",
             "-c", "user.email=dockge-enhanced@localhost",
-            "commit", "-m", message,
+            // The index is shared when stacks are subdirectories of one repository.
+            "commit", "--only", "-m", message, "--", ...paths,
         ]);
         return await this.status(stackName);
     }
