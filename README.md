@@ -48,6 +48,8 @@ A feature-focused fork of [Dockge](https://github.com/louislam/dockge) that turn
 | **Integrations** | PowerWatch and PowerWatch Hub, PlugNPiN plus per-service label assistance for Nginx Proxy Manager, Pi-hole and AdGuard Home |
 | **Notifications & access** | Discord and Apprise notifications localized in EN/FR/ES/zh-CN, multi-instance awareness, 2FA, trusted proxy support, Turnstile and third-party mobile clients |
 
+Monitoring also supports [generic JSON webhooks](docs/monitoring-webhooks.md) for unhealthy-container and crash-loop events, with optional HMAC signatures, bounded retries, and an authenticated delivery test API.
+
 > **Update schedules:** when automatic Dockge-Enhanced updates use a maintenance window, the same window applies to every automatic container image update. Updates detected outside it are queued until the next allowed window. Per-image schedules remain available when no global window is configured, while **Update now** always remains immediate.
 
 ## Latest updates
