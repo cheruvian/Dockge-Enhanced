@@ -1,8 +1,9 @@
 /**
  * MonitoringWatcher - crash-loop detection and optional Docker health auto-heal.
- * Notifications via Discord + Apprise.
+ * Notifications via Discord, Apprise and generic JSON webhooks.
  */
 
+import { deliverMonitoringWebhooks, monitoringNotification, MonitoringWebhook, validateMonitoringWebhooks } from "../notification/webhook";
 import { spawn } from "child_process";
 import childProcessAsync from "promisify-child-process";
 import * as path from "path";
@@ -40,6 +41,7 @@ export interface MonitoringSettings {
     healthcheckEnabled: boolean;
     healthcheckAutoHealMode: HealthAutoHealMode;
     healthcheckCooldownMinutes: number;
+    webhooks: MonitoringWebhook[];
     discordWebhooks: string[];
     appriseUrls: string[];
     notificationLang: NotificationLang;
@@ -86,6 +88,7 @@ const DEFAULT_SETTINGS: MonitoringSettings = {
     healthcheckEnabled: false,
     healthcheckAutoHealMode: "notify",
     healthcheckCooldownMinutes: 30,
+    webhooks: [],
     discordWebhooks: [],
     appriseUrls: [],
     notificationLang: "fr",
@@ -126,6 +129,12 @@ export class MonitoringWatcher {
         try {
             const raw = await fs.readFile(SETTINGS_PATH, "utf8");
             this.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) as Partial<MonitoringSettings> };
+            try {
+                this.settings.webhooks = validateMonitoringWebhooks(this.settings.webhooks);
+            } catch {
+                this.settings.webhooks = [];
+                log.warn("monitoring", "Invalid webhook settings; webhook delivery disabled");
+            }
             if (!["notify", "restart_container", "restart_service", "stack_aware"].includes(this.settings.healthcheckAutoHealMode)) {
                 this.settings.healthcheckAutoHealMode = "notify";
             }
@@ -145,6 +154,9 @@ export class MonitoringWatcher {
 
     async saveSettings(partial: Partial<MonitoringSettings>): Promise<void> {
         const safePartial = { ...partial };
+        if (partial.webhooks !== undefined) {
+            safePartial.webhooks = validateMonitoringWebhooks(partial.webhooks);
+        }
         const changedKeys = Object.keys(partial) as Array<keyof MonitoringSettings>;
         if (
             safePartial.healthcheckAutoHealMode !== undefined &&
@@ -174,7 +186,13 @@ export class MonitoringWatcher {
 
     private async persistSettings(): Promise<void> {
         await fs.mkdir(DATA_DIR, { recursive: true });
-        await fs.writeFile(SETTINGS_PATH, JSON.stringify(this.settings, null, 2));
+        const file = await fs.open(SETTINGS_PATH, "w", 0o600);
+        try {
+            await file.chmod(0o600);
+            await file.writeFile(JSON.stringify(this.settings, null, 2));
+        } finally {
+            await file.close();
+        }
     }
 
     async startIfEnabled(): Promise<void> {
@@ -432,7 +450,27 @@ export class MonitoringWatcher {
         } catch { return null; }
     }
 
+    async sendWebhookNotification(type: "container.unhealthy" | "container.crash_loop" | "notification.test", data: Record<string, unknown>) {
+        if (this.settings.webhooks.length === 0) {
+            return [];
+        }
+        let hostname = "";
+        try {
+            hostname = String((await Settings.get("primaryHostname")) || "");
+        } catch {
+            log.warn("monitoring", "Hostname unavailable for webhook notification");
+        }
+        const results = await deliverMonitoringWebhooks(this.settings.webhooks, monitoringNotification(type, hostname, data));
+        for (const result of results) {
+            if (!result.ok) {
+                log.warn("monitoring", `Webhook destination ${result.destination + 1} failed after ${result.attempts} attempts`);
+            }
+        }
+        return results;
+    }
+
     private async sendCrashAlert(event: CrashEvent): Promise<void> {
+        await this.sendWebhookNotification("container.crash_loop", { ...event });
         const discord = this.settings.discordWebhooks.length > 0
             ? new DiscordNotifier(this.settings.discordWebhooks)
             : null;
@@ -470,6 +508,7 @@ export class MonitoringWatcher {
     }
 
     private async sendHealthAlert(event: HealthEvent): Promise<void> {
+        await this.sendWebhookNotification("container.unhealthy", { ...event });
         const discord = this.settings.discordWebhooks.length > 0
             ? new DiscordNotifier(this.settings.discordWebhooks)
             : null;

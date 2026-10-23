@@ -3,6 +3,7 @@
  * Routes : settings, overview, crash events, stacks list.
  */
 
+import { validateMonitoringWebhooks } from "../notification/webhook";
 import { DockgeServer } from "../dockge-server";
 import { Router } from "../router";
 import express, { Express, Request, Response, NextFunction } from "express";
@@ -80,6 +81,15 @@ export class MonitoringRouter extends Router {
         router.post("/monitoring/settings", async (req: Request, res: Response) => {
             try {
                 const partial = req.body as Partial<MonitoringSettings>;
+                if (partial.webhooks !== undefined) {
+                    try {
+                        validateMonitoringWebhooks(partial.webhooks);
+                    } catch (error) {
+                        res.status(400).json({ ok: false,
+                            message: error instanceof Error ? error.message : "Invalid webhooks" });
+                        return;
+                    }
+                }
                 if (partial.historyEnabled !== undefined && typeof partial.historyEnabled !== "boolean") {
                     res.status(400).json({
                         ok: false,
@@ -127,6 +137,17 @@ export class MonitoringRouter extends Router {
                     ok: false,
                     message: String(e),
                 });
+            }
+        });
+
+        router.post("/monitoring/webhooks/test", async (_req: Request, res: Response) => {
+            try {
+                const deliveries = await MonitoringWatcher.getInstance().sendWebhookNotification("notification.test", { message: "Dockge monitoring webhook test" });
+                res.json({ ok: deliveries.length > 0 && deliveries.every(result => result.ok),
+                    deliveries });
+            } catch {
+                res.status(500).json({ ok: false,
+                    message: "Webhook test failed" });
             }
         });
 
